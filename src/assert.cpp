@@ -39,6 +39,9 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "libtorrent/aux_/disable_warnings_push.hpp"
 
+#include <boost/stacktrace.hpp>
+#include <iostream>
+
 #ifdef TORRENT_PRODUCTION_ASSERTS
 #include <atomic>
 #endif
@@ -346,6 +349,8 @@ TORRENT_EXPORT void assert_fail(char const* expr, int line
 	char stack[8192];
 	stack[0] = '\0';
 	print_backtrace(stack, sizeof(stack), 0);
+
+	std::cerr << boost::stacktrace::stacktrace();
 
 	char const* message = "assertion failed. Please file a bugreport at "
 		"https://github.com/arvidn/libtorrent/issues\n"

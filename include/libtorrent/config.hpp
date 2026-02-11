@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2005, 2008-2022, Arvid Norberg
+Copyright (c) 2005, 2008-2026, Arvid Norberg
 Copyright (c) 2009, Daniel Wallin
 Copyright (c) 2015, John Sebastian Peterson
 Copyright (c) 2016-2017, 2019, 2021, Alden Torres
@@ -547,6 +547,10 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #ifndef TORRENT_USE_I2P
 #define TORRENT_USE_I2P 1
+#endif
+
+#ifndef TORRENT_USE_CURL
+#define TORRENT_USE_CURL 0
 #endif
 
 #ifndef TORRENT_HAS_SYMLINK

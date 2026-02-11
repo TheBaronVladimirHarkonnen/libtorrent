@@ -202,10 +202,17 @@ set(libtorrent_aux_include_files
 	bandwidth_queue_entry.hpp
 	bandwidth_socket.hpp
 	bind_to_device.hpp
+	bitmask.hpp
 	buffer.hpp
 	byteswap.hpp
 	chained_buffer.hpp
 	cpuid.hpp
+	curl.hpp
+	curl_boost_socket.hpp
+	curl_pool.hpp
+	curl_request.hpp
+	curl_tracker_manager.hpp
+	curl_tracker_request.hpp
 	deferred_handler.hpp
 	deprecated.hpp
 	deque.hpp
@@ -229,6 +236,7 @@ set(libtorrent_aux_include_files
 	has_block.hpp
 	heterogeneous_queue.hpp
 	instantiate_connection.hpp
+	intrusive_list.hpp
 	invariant_check.hpp
 	io.hpp
 	ip_helpers.hpp
@@ -236,6 +244,7 @@ set(libtorrent_aux_include_files
 	keepalive.hpp
 	listen_socket_handle.hpp
 	lsd.hpp
+	memory.hpp
 	merkle.hpp
 	merkle_tree.hpp
 	netlink_utils.hpp
@@ -310,6 +319,11 @@ set(sources
 	cpuid.cpp
 	crc32c.cpp
 	create_torrent.cpp
+	curl_boost_socket.cpp
+	curl_pool.cpp
+	curl_request.cpp
+	curl_tracker_manager.cpp
+	curl_tracker_request.cpp
 	directory.cpp
 	disabled_disk_io.cpp
 	disk_buffer_holder.cpp
@@ -714,6 +728,8 @@ target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME extens
 	DESCRIPTION "Enables protocol extensions" DISABLED TORRENT_DISABLE_EXTENSIONS)
 target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME i2p DEFAULT ON
 	DESCRIPTION "build with I2P support" DISABLED TORRENT_USE_I2P=0)
+target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME curl DEFAULT OFF
+	DESCRIPTION "Enable support for connection reuse and advanced HTTP features towards trackers" ENABLED TORRENT_USE_CURL=1)
 target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME logging DEFAULT ON
 	DESCRIPTION "build with logging" DISABLED TORRENT_DISABLE_LOGGING)
 target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME mutable-torrents DEFAULT ON
@@ -807,12 +823,27 @@ else()
 	target_compile_definitions(torrent-rasterbar PUBLIC TORRENT_DISABLE_DHT)
 endif()
 
+if (curl)
+	find_public_dependency(CURL REQUIRED)
+	set_package_properties(CURL
+		PROPERTIES
+		URL "https://curl.se/"
+		DESCRIPTION "Command line tool and library for transferring data with URLs"
+		TYPE RECOMMENDED
+		PURPOSE "Enable support for connection reuse and advanced HTTP features towards tracker"
+	)
+	target_link_libraries(torrent-rasterbar PUBLIC CURL::libcurl)
+
+	target_optional_compile_definitions(torrent-rasterbar PUBLIC FEATURE NAME curl_debug DEFAULT OFF
+		DESCRIPTION "Enable curl logging connection details to stderr" ENABLED TORRENT_DEBUG_LIBCURL=1)
+endif()
+
 # Boost
 find_public_dependency(Boost REQUIRED)
 target_link_libraries(torrent-rasterbar PUBLIC Boost::headers)
 if (Boost_MAJOR_VERSION LESS_EQUAL 1 AND Boost_MINOR_VERSION LESS 69)
 	find_public_dependency(Boost REQUIRED COMPONENTS system)
-	target_link_libraries(torrent-rasterbar PUBLIC Boost::system)
+	target_link_libraries(torrent-rasterbar PUBLIC Boost::system Boost::stacktrace dl)
 endif()
 
 if (exceptions)

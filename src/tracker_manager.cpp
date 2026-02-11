@@ -48,6 +48,32 @@ POSSIBILITY OF SUCH DAMAGE.
 using namespace std::placeholders;
 
 namespace libtorrent {
+const char* event_string(event_t event)
+{
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic error "-Wswitch"
+#endif
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic error "-Wswitch"
+#endif
+	switch (event)
+	{
+		case event_t::none:      return "none";
+		case event_t::completed: return "completed";
+		case event_t::started:   return "started";
+		case event_t::stopped:   return "stopped";
+		case event_t::paused:    return "paused";
+	}
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
+	return "";
+}
 
 constexpr tracker_request_flags_t tracker_request::scrape_request;
 constexpr tracker_request_flags_t tracker_request::i2p;
@@ -203,6 +229,9 @@ constexpr tracker_request_flags_t tracker_request::i2p;
 #if !defined TORRENT_DISABLE_LOGGING || TORRENT_USE_ASSERTS
 		, m_ses(ses)
 #endif
+#if TORRENT_USE_CURL
+		, m_curl_requests(*this)
+#endif
 	{}
 
 	tracker_manager::~tracker_manager()
@@ -290,6 +319,17 @@ constexpr tracker_request_flags_t tracker_request::i2p;
 		if (protocol == "http")
 #endif
 		{
+#if TORRENT_USE_CURL
+#if TORRENT_USE_I2P
+			const bool is_i2p = is_i2p_url(req.url);
+#else
+			const bool is_i2p = false;
+#endif
+			if (!is_i2p) {
+				m_curl_requests.add(ios, std::move(req), std::move(c));
+				return;
+			}
+#endif
 			auto con = std::make_shared<http_tracker_connection>(ios, *this, std::move(req), c);
 			if (m_http_conns.size() < std::size_t(sett.get_int(settings_pack::max_concurrent_http_announces)))
 			{
@@ -475,6 +515,10 @@ constexpr tracker_request_flags_t tracker_request::i2p;
 #endif
 		}
 
+#if TORRENT_USE_CURL
+		m_curl_requests.abort_all(all);
+#endif
+
 		for (auto const& c : close_http_connections)
 			c->close();
 
@@ -485,12 +529,21 @@ constexpr tracker_request_flags_t tracker_request::i2p;
 	bool tracker_manager::empty() const
 	{
 		TORRENT_ASSERT(is_single_thread());
-		return m_http_conns.empty() && m_udp_conns.empty();
+		return m_http_conns.empty() && m_udp_conns.empty()
+#if TORRENT_USE_CURL
+			&& m_curl_requests.empty()
+#endif
+		;
 	}
 
 	int tracker_manager::num_requests() const
 	{
 		TORRENT_ASSERT(is_single_thread());
-		return int(m_http_conns.size() + m_udp_conns.size());
+		return int(m_http_conns.size() + m_udp_conns.size())
+#if TORRENT_USE_CURL
+			// Note: we don't know if these are connections or queued inside curl
+			+ m_curl_requests.count()
+#endif
+		;
 	}
 }

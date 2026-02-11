@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2004-2022, Arvid Norberg
+Copyright (c) 2004-2026, Arvid Norberg
 Copyright (c) 2004, Magnus Jonsson
 Copyright (c) 2015, Mikhail Titov
 Copyright (c) 2016-2018, 2020, Alden Torres
@@ -64,40 +64,23 @@ POSSIBILITY OF SUCH DAMAGE.
 
 namespace libtorrent {
 
-	http_tracker_connection::http_tracker_connection(
-		io_context& ios
-		, tracker_manager& man
-		, tracker_request req
-		, std::weak_ptr<request_callback> c)
-		: tracker_connection(man, std::move(req), ios, std::move(c))
-		, m_ioc(ios)
-	{}
+	std::string build_tracker_url(const tracker_request& req, aux::session_settings const& settings, bool i2p, error_code& ec) {
+		// a wrapper to keep the code the same
+		auto tracker_req = [&]()-> const tracker_request& { return req; };
 
-	void http_tracker_connection::start()
-	{
 		std::string url = tracker_req().url;
 
 		if (tracker_req().kind & tracker_request::scrape_request)
 		{
 			// find and replace "announce" with "scrape"
 			// in request
-
 			std::size_t pos = url.find("announce");
-			if (pos == std::string::npos)
-			{
-				fail(errors::scrape_not_available, operation_t::bittorrent);
-				return;
+			if (pos == std::string::npos) {
+				ec = errors::scrape_not_available;
+				return {};
 			}
 			url.replace(pos, 8, "scrape");
 		}
-
-#if TORRENT_USE_I2P
-		bool const i2p = is_i2p_url(url);
-#else
-		static const bool i2p = false;
-#endif
-
-		aux::session_settings const& settings = m_man.settings();
 
 		// if request-string already contains
 		// some parameters, append an ampersand instead
@@ -110,8 +93,8 @@ namespace libtorrent {
 			bool const ssrf_mitigation = settings.get_bool(settings_pack::ssrf_mitigation);
 			if (ssrf_mitigation && has_tracker_query_string(string_view(url).substr(arguments_start + 1)))
 			{
-				fail(errors::ssrf_mitigation, operation_t::bittorrent);
-				return;
+				ec = errors::ssrf_mitigation;
+				return {};
 			}
 			url += "&";
 		}
@@ -174,9 +157,8 @@ namespace libtorrent {
 			{
 				if (tracker_req().i2pconn->local_endpoint().empty())
 				{
-					fail(errors::no_i2p_endpoint, operation_t::bittorrent
-						, "Waiting for i2p acceptor from SAM bridge", seconds32(5));
-					return;
+					ec = errors::no_i2p_endpoint;
+					return {};
 				}
 				else
 				{
@@ -212,6 +194,39 @@ namespace libtorrent {
 				url += "&ipv6=";
 				url += escape_string(ip);
 			}
+		}
+
+		return url;
+	}
+
+	http_tracker_connection::http_tracker_connection(
+		io_context& ios
+		, tracker_manager& man
+		, tracker_request req
+		, std::weak_ptr<request_callback> c)
+		: tracker_connection(man, std::move(req), ios, std::move(c))
+		, m_ioc(ios)
+	{}
+
+	void http_tracker_connection::start()
+	{
+#if TORRENT_USE_I2P
+		bool const i2p = is_i2p_url(tracker_req().url);
+#else
+		static const bool i2p = false;
+#endif
+
+		auto& settings = m_man.settings();
+		error_code ec;
+		std::string url = build_tracker_url(tracker_req(), settings, i2p, ec);
+		if (ec) {
+			if (ec == errors::no_i2p_endpoint) {
+				fail(errors::no_i2p_endpoint, operation_t::bittorrent, "Waiting for i2p acceptor from SAM bridge", seconds32(5));
+			}
+			else {
+				fail(ec, operation_t::bittorrent);
+			}
+			return;
 		}
 
 		// i2p trackers don't use our outgoing sockets, they use the SAM

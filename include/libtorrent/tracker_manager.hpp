@@ -69,6 +69,10 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/ssl.hpp"
 #include "libtorrent/string_view.hpp"
 
+#if TORRENT_USE_CURL
+#include "libtorrent/aux_/curl_tracker_manager.hpp"
+#endif
+
 namespace libtorrent {
 
 	class tracker_manager;
@@ -97,6 +101,8 @@ enum class event_t : std::uint8_t
 	stopped,
 	paused
 };
+
+const char* event_string(event_t event);
 
 	struct TORRENT_EXTRA_EXPORT tracker_request
 	{
@@ -388,6 +394,9 @@ enum class event_t : std::uint8_t
 			, udp::endpoint const& ep, span<char const> p
 			, error_code& ec, udp_send_flags_t flags = {});
 
+#if !defined TORRENT_DISABLE_LOGGING || TORRENT_USE_ASSERTS
+		aux::session_logger& get_session() const { return m_ses; }
+#endif
 	private:
 
 		// maps transactionid to the udp_tracker_connection
@@ -406,6 +415,9 @@ enum class event_t : std::uint8_t
 		bool m_abort = false;
 #if !defined TORRENT_DISABLE_LOGGING || TORRENT_USE_ASSERTS
 		aux::session_logger& m_ses;
+#endif
+#if TORRENT_USE_CURL
+		aux::curl_tracker_manager m_curl_requests;
 #endif
 	};
 }
