@@ -13,10 +13,10 @@ see LICENSE file.
 #include "libtorrent/config.hpp"
 
 #if TORRENT_USE_CURL
-#include <memory>
+#include "libtorrent/aux_/bitmask.hpp"
 #include "libtorrent/aux_/curl.hpp"
 #include "libtorrent/aux_/intrusive_list.hpp"
-#include "libtorrent/aux_/bitmask.hpp"
+#include "libtorrent/aux_/memory.hpp"
 #include "libtorrent/error_code.hpp"
 
 #if defined TORRENT_WINDOWS || defined TORRENT_CYGWIN
@@ -42,7 +42,7 @@ public:
 	{
 	}
 
-	void set_poll_mode(bitmask<curl_poll_t> curl_poll_mode);
+	void set_poll_mode(bitmask<curl_poll_t> new_poll_mode);
 
 	// releases the native_handle without closing it
 	void release_handle() { m_socket.release(); }

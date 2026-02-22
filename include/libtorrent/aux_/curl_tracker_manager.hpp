@@ -13,23 +13,22 @@ see LICENSE file.
 #include "libtorrent/config.hpp"
 
 #if TORRENT_USE_CURL
-#include <memory>
-
-#include "libtorrent/io_context.hpp"
 #include "libtorrent/aux_/curl.hpp"
 #include "libtorrent/aux_/curl_tracker_request.hpp"
 #include "libtorrent/aux_/intrusive_list.hpp"
+#include "libtorrent/aux_/memory.hpp"
+#include "libtorrent/io_context.hpp"
 
 namespace libtorrent {
-struct tracker_request;
 struct request_callback;
 class tracker_manager;
+struct tracker_request;
 }
 
 namespace libtorrent::aux {
-struct session_settings;
 class curl_pool;
 class curl_tracker_request;
+struct session_settings;
 
 struct TORRENT_EXTRA_EXPORT curl_global_initializer {
 	curl_global_initializer();
@@ -48,12 +47,12 @@ public:
 	// the request callback shall not be called before this function returns
 	void add(io_context& ios,
 			tracker_request&& req,
-			std::weak_ptr<request_callback> c);
+			std::weak_ptr<request_callback> cb);
 
 	// note: stopped events notify the tracker that this client is no longer an active peer
 	void abort_all(bool abort_stopped_events = false);
 
-	[[nodiscard]] int count() const noexcept;
+	[[nodiscard]] int size()   const noexcept { return static_cast<int>(m_requests.size()); }
 	[[nodiscard]] bool empty() const noexcept { return m_requests.empty(); }
 
 	void received_bytes(int bytes);
@@ -65,7 +64,7 @@ private:
 	// two-step initialization because it needs an executor
 	void initialize_pool(io_context& ios);
 	std::unique_ptr<curl_tracker_request> remove(curl_tracker_request& request);
-	void on_completed(CURL* request, CURLcode result);
+	void on_completed(CURL* handle, CURLcode result);
 
 	// constructed first, destructed last
 	curl_global_initializer m_curl_initializer;

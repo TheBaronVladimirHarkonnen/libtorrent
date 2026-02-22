@@ -13,7 +13,6 @@ see LICENSE file.
 
 #include <memory>
 #include <iterator>
-
 #include "libtorrent/assert.hpp"
 
 namespace libtorrent::aux {
@@ -71,7 +70,8 @@ struct unique_ptr_intrusive_list_traits {
 	static node& set_next(node& n, node_ownership next) noexcept
 	{
 		TORRENT_ASSERT_PRECOND_MSG(
-			!n.next_, "Overwriting 'next' pointer risks accidentally all list-items after this one");
+			!n.next_, "Overwriting 'next' pointer risks accidentally deleting all list-items after this one recursively"
+					  " and overflowing the stack");
 		n.next_ = std::move(next);
 		return *n.next_;
 	}
@@ -90,14 +90,14 @@ class ownership_intrusive_list {
 	using node_ownership = typename value_traits::node_ownership;
 
 	// an exception in one of these functions would leave the list in an unspecified state
-	static_assert(std::is_nothrow_move_constructible_v<node_ownership>);
-	static_assert(std::is_nothrow_invocable_v<decltype(value_traits::take_next_ownership), node&>);
-	static_assert(std::is_nothrow_invocable_v<decltype(value_traits::set_next), node&, node_ownership>);
-	static_assert(std::is_nothrow_invocable_v<decltype(value_traits::get_previous), const node&>);
-	static_assert(std::is_nothrow_invocable_v<decltype(value_traits::get_next), const node&>);
-	static_assert(std::is_nothrow_invocable_v<decltype(value_traits::set_previous), node&, node*>);
-	static_assert(std::is_nothrow_invocable_v<decltype(value_traits::ptr), const node_ownership &>);
-	static_assert(std::is_nothrow_invocable_v<decltype(value_traits::ref), const node_ownership &>);
+	static_assert(std::is_nothrow_move_constructible_v<node_ownership>
+		&& std::is_nothrow_invocable_v<decltype(value_traits::take_next_ownership), node&>
+		&& std::is_nothrow_invocable_v<decltype(value_traits::set_next), node&, node_ownership>
+		&& std::is_nothrow_invocable_v<decltype(value_traits::get_previous), const node&>
+		&& std::is_nothrow_invocable_v<decltype(value_traits::get_next), const node&>
+		&& std::is_nothrow_invocable_v<decltype(value_traits::set_previous), node&, node*>
+		&& std::is_nothrow_invocable_v<decltype(value_traits::ptr), const node_ownership &>
+		&& std::is_nothrow_invocable_v<decltype(value_traits::ref), const node_ownership &>);
 
 	// tail is stored as the previous() of the head
 	// tail has an empty next() pointer
@@ -120,12 +120,12 @@ class ownership_intrusive_list {
 	}
 
 public:
-	node* tail() const noexcept
+	[[nodiscard]] node* tail() const noexcept
 	{
 		return empty() ? nullptr : value_traits::get_previous(value_traits::ref(m_head));
 	}
 
-	node* head() const noexcept
+	[[nodiscard]] node* head() const noexcept
 	{
 		return value_traits::ptr(m_head);
 	}
@@ -300,14 +300,14 @@ public:
 	using iterator = basic_iterator<false>;
 	using const_iterator = basic_iterator<true>;
 
-	iterator begin() noexcept { return iterator{ value_traits::ptr(m_head) }; }
-	iterator end()   noexcept { return iterator{nullptr}; }
+	[[nodiscard]] iterator begin() noexcept { return iterator{ value_traits::ptr(m_head) }; }
+	[[nodiscard]] iterator end()   noexcept { return iterator{nullptr}; }
 
-	const_iterator begin() const noexcept { return const_iterator{ value_traits::ptr(m_head) }; }
-	const_iterator end()   const noexcept { return const_iterator{nullptr}; }
+	[[nodiscard]] const_iterator begin() const noexcept { return const_iterator{ value_traits::ptr(m_head) }; }
+	[[nodiscard]] const_iterator end()   const noexcept { return const_iterator{nullptr}; }
 
-	const_iterator cbegin() const noexcept { return begin(); }
-	const_iterator cend()   const noexcept { return end(); }
+	[[nodiscard]] const_iterator cbegin() const noexcept { return begin(); }
+	[[nodiscard]] const_iterator cend()   const noexcept { return end(); }
 
 	// invalidates "it" but leaves all other iterators valid, returns a new valid iterator to the next element
 	iterator remove(iterator it) noexcept

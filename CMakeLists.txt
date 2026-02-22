@@ -208,6 +208,7 @@ set(libtorrent_aux_include_files
 	chained_buffer.hpp
 	cpuid.hpp
 	curl.hpp
+	curl_basic_request.hpp
 	curl_boost_socket.hpp
 	curl_pool.hpp
 	curl_request.hpp
@@ -235,6 +236,7 @@ set(libtorrent_aux_include_files
 	file_view_pool.hpp
 	has_block.hpp
 	heterogeneous_queue.hpp
+	http_tracker_request_common.hpp
 	instantiate_connection.hpp
 	intrusive_list.hpp
 	invariant_check.hpp
@@ -319,6 +321,7 @@ set(sources
 	cpuid.cpp
 	crc32c.cpp
 	create_torrent.cpp
+	curl_basic_request.cpp
 	curl_boost_socket.cpp
 	curl_pool.cpp
 	curl_request.cpp
@@ -352,6 +355,7 @@ set(sources
 	http_parser.cpp
 	http_seed_connection.cpp
 	http_tracker_connection.cpp
+	http_tracker_request_common.cpp
 	i2p_stream.cpp
 	identify_client.cpp
 	instantiate_connection.cpp

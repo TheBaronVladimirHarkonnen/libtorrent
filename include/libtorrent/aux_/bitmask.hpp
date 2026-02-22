@@ -23,7 +23,7 @@ public:
 
 	constexpr bitmask(E e = static_cast<E>(0)) noexcept : bits(static_cast<U>(e)) {}
 	constexpr explicit bitmask(U b) noexcept : bits(b) {}
-	constexpr U raw() const noexcept { return bits; }
+	[[nodiscard]] constexpr U raw() const noexcept { return bits; }
 
 	constexpr bool operator==(bitmask o) const noexcept { return bits == o.bits; }
 	constexpr bitmask operator|(bitmask o) const noexcept { return bitmask(bits | o.bits); }
@@ -35,8 +35,8 @@ public:
 	constexpr bitmask& operator^=(bitmask o) noexcept { bits ^= o.bits; return *this; }
 
 	constexpr explicit operator bool() const noexcept { return bits != 0; }
-	constexpr bool test(E e)           const noexcept { return (bits & static_cast<U>(e)) != 0; }
-	constexpr bool test(bitmask o)     const noexcept { return (bits & o.bits) != 0; }
+	[[nodiscard]] constexpr bool test(E e)       const noexcept { return (bits & static_cast<U>(e)) != 0; }
+	[[nodiscard]] constexpr bool test(bitmask o) const noexcept { return (bits & o.bits) != 0; }
 	constexpr void unset(E e) noexcept { bits &= ~static_cast<U>(e); }
 };
 

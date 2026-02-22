@@ -16,7 +16,6 @@ see LICENSE file.
 #include <stdexcept>
 #include <string>
 #include <curl/curl.h>
-#include "libtorrent/string_view.hpp"
 
 namespace libtorrent::aux {
 
@@ -39,7 +38,7 @@ enum class curl_cselect_t : int {
 // to verify the types (it's currently not working for C++)
 
 template<CURLoption option>
-CURLcode curl_easy_setopt_typechecked(CURL* easy_handle, long value)
+CURLcode curl_easy_setopt_typechecked(CURL* easy_handle, const long value)
 {
 	static_assert(option >= CURLOPTTYPE_LONG && option < CURLOPTTYPE_OBJECTPOINT);
 	return curl_easy_setopt(easy_handle, option, value);
@@ -47,7 +46,7 @@ CURLcode curl_easy_setopt_typechecked(CURL* easy_handle, long value)
 
 // char*, function pointers, callback data (void*)
 template<CURLoption option, typename T, typename = std::enable_if_t<std::is_pointer_v<T>>>
-CURLcode curl_easy_setopt_typechecked(CURL* easy_handle, T value)
+CURLcode curl_easy_setopt_typechecked(CURL* easy_handle, const T value)
 {
 	static_assert(option >= CURLOPTTYPE_OBJECTPOINT && option < CURLOPTTYPE_OFF_T);
 	return curl_easy_setopt(easy_handle, option, value);
@@ -105,14 +104,13 @@ CURLcode curl_easy_getinfo_typechecked(CURL* easy_handle, T& value)
 
 class curl_easy_error: public std::runtime_error
 {
-private:
 	CURLcode code_;
 
 public:
 	curl_easy_error( CURLcode const ec, std::string const & prefix ):
 		std::runtime_error( prefix + ": " + curl_easy_strerror(ec) ), code_( ec ) {}
 
-	CURLcode code() const noexcept
+	[[nodiscard]] CURLcode code() const noexcept
 	{
 		return code_;
 	}

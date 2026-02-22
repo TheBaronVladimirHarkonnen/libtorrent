@@ -32,7 +32,7 @@ size_t ignore_data_cb(char* /*ptr*/,
 	return nmemb;
 }
 
-std::unique_ptr<curl_request> create_request(std::string url)
+std::unique_ptr<curl_request> create_request(const std::string& url)
 {
 	auto request = std::make_unique<curl_request>(megabyte_buffer);
 	request->set_defaults();
@@ -44,7 +44,7 @@ std::unique_ptr<curl_request> create_request(std::string url)
 }
 
 template<typename F>
-void get_url(std::string url, F&& on_complete)
+void get_url(const std::string& url, F&& on_complete)
 {
 	curl_global_initializer raii;
 	auto request = create_request(url);
@@ -77,7 +77,7 @@ TORRENT_TEST(curl_bad_urls)
 	};
 
 	for (auto& entry : test_errors) {
-		get_url(entry.url, [&entry](curl_request&r, CURLcode code) {
+		get_url(entry.url, [&entry](const curl_request&r, CURLcode code) {
 			auto [ec, op, message] = r.get_error(code);
 			TEST_EQUAL(entry.result, ec);
 		});
@@ -106,7 +106,7 @@ TORRENT_TEST(curl_connection_reuse)
 
 	ios.run();
 
-	const std::size_t cMiB10 = 1024 * 1024 * 10;
+	constexpr std::size_t cMiB10 = 1024 * 1024 * 10;
 	long connection_count = 0;
 	for (auto& entry : requests)
 	{
@@ -158,7 +158,7 @@ TORRENT_TEST(address_compatibility)
 {
 	// make sure scope_id is not printed in to_string()
 	address addr = make_address_v6("::1");
-	TEST_CHECK(addr.to_string().find("%") == std::string::npos);
+	TEST_CHECK(addr.to_string().find('%') == std::string::npos);
 	TEST_EQUAL(addr.to_string(), "::1");
 }
 

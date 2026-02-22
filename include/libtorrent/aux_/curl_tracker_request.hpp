@@ -13,15 +13,16 @@ see LICENSE file.
 #include "libtorrent/config.hpp"
 
 #if TORRENT_USE_CURL
-#include "libtorrent/aux_/intrusive_list.hpp"
-#include "libtorrent/time.hpp"
-#include "libtorrent/error_code.hpp"
 #include "libtorrent/aux_/curl.hpp"
 #include "libtorrent/aux_/curl_request.hpp"
+#include "libtorrent/aux_/intrusive_list.hpp"
+#include "libtorrent/aux_/http_tracker_request_common.hpp"
+#include "libtorrent/error_code.hpp"
+#include "libtorrent/time.hpp"
 
 namespace libtorrent {
-struct tracker_request;
 struct request_callback;
+struct tracker_request;
 }
 
 namespace libtorrent::aux {
@@ -29,7 +30,7 @@ class curl_tracker_manager;
 
 class curl_tracker_request : public unique_ptr_intrusive_list_base<curl_tracker_request> {
 public:
-	using error_type = curl_request::error_type;
+	using error_type = http_tracker_request_common::error_type;
 
 	curl_tracker_request(
 		curl_tracker_manager& owner,
@@ -50,7 +51,7 @@ public:
 #endif
 
 	void complete(CURLcode result);
-	void fail(const error_type& info) { fail(info.ec, info.op, info.message); }
+	void fail(const error_type& info) { fail(info.code, info.op, info.failure_reason, info.interval); }
 
 	curl_request& get_curl_request() noexcept { return m_request; }
 	[[nodiscard]] const curl_request & get_curl_request() const noexcept { return m_request; }
@@ -68,7 +69,7 @@ private:
 
 	// storing the entire tracker_request object should not be necessary
 	// unique_ptr to prevent circular header includes
-	std::unique_ptr<const tracker_request> m_params;
+	const std::unique_ptr<const tracker_request> m_params;
 
 	curl_tracker_manager& m_owner;
 	curl_request m_request;

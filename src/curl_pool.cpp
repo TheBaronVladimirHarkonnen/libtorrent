@@ -11,15 +11,15 @@ see LICENSE file.
 #include "libtorrent/aux_/curl_pool.hpp"
 
 #if TORRENT_USE_CURL
-#include "libtorrent/aux_/curl_request.hpp"
 #include "libtorrent/aux_/curl_boost_socket.hpp"
+#include "libtorrent/aux_/curl_request.hpp"
 #include "libtorrent/debug.hpp"
-#include "libtorrent/error_code.hpp"
 #include "libtorrent/error.hpp"
+#include "libtorrent/error_code.hpp"
 
 namespace libtorrent::aux {
-
-static void check_multi_returncode(CURLMcode result, string_view context)
+namespace {
+void check_multi_returncode(CURLMcode result, string_view context)
 {
 	TORRENT_ASSERT(result == CURLM_OK);
 	if (result != CURLM_OK)
@@ -35,6 +35,7 @@ static void check_multi_returncode(CURLMcode result, string_view context)
 		throw_ex<std::runtime_error>(message);
 	}
 }
+} // anonymous namespace
 
 int curl_pool::update_socket_shim([[maybe_unused]] CURL* easy_handle,
 							curl_socket_t native_socket,
@@ -160,8 +161,8 @@ curl_pool::~curl_pool()
 {
 	// The curl_multi_cleanup destructor is allowed to:
 	// - update m_sockets with update_socket(event, socket)
-	// - reset timeout with set_timeout(-1)
-	// Probably good to destroy it manually in order for these callbacks to be run while the class object is still valid.
+	// It's probably a good to destroy it manually in order for these callbacks to be run while the class object is
+	// still valid.
 	//
 	// Note that it can't be a unique_ptr:
 	// - m_curl_handle should stay a valid pointer during the destructor in case it is used by the callback code.
@@ -179,10 +180,7 @@ curl_pool::~curl_pool()
 void curl_pool::set_max_connections(int max_connections)
 {
 	max_connections = std::max(0, max_connections);
-	if (m_max_connections == max_connections)
-		return;
-	m_max_connections = max_connections;
-	setopt(CURLMOPT_MAX_TOTAL_CONNECTIONS, static_cast<long>(m_max_connections));
+	setopt(CURLMOPT_MAX_TOTAL_CONNECTIONS, static_cast<long>(max_connections));
 }
 
 void curl_pool::set_max_host_connections(long value)
@@ -191,29 +189,20 @@ void curl_pool::set_max_host_connections(long value)
 }
 
 // sockets notify the pool on file descriptor event
-bool curl_pool::socket_event(curl_boost_socket& socket, curl_cselect_t event)
+void curl_pool::socket_event(curl_boost_socket& socket, curl_cselect_t event)
 {
-	m_calling_socket = &socket;
-
 	process_socket_action(socket.native_handle(), event);
-
-	// process_socket_action() may remove the socket though a curl callback, in that case `m_calling_socket` should
-	// be nullptr now
-	bool alive = m_calling_socket != nullptr;
-	m_calling_socket = nullptr;
-	return alive;
 }
 
 void curl_pool::process_socket_action(curl_socket_t native_socket, curl_cselect_t event)
 {
-	int running_handles = 0;
+	int running_handles = 0; // also counts curl internal handles
 
 	// note: curl completely ignores the "event" parameter internally
 	auto result = curl_multi_socket_action(handle(), native_socket, static_cast<int>(event), &running_handles);
 	check_multi_returncode(result, "curl_multi_socket_action");
 
-	if (running_handles < m_active_requests)
-		process_completed_requests();
+	process_completed_requests();
 }
 
 void curl_pool::process_completed_requests()
@@ -223,6 +212,7 @@ void curl_pool::process_completed_requests()
 	{
 		// verify that CURLMSG_DONE is the only possible value
 		static_assert((CURLMSG_NONE + 1 == CURLMSG_DONE) && (CURLMSG_DONE == CURLMSG_LAST - 1));
+		// The easy_handle belongs to one of our requests, curl does not put internal easy_handles on the message queue
 		if (m_completion_handler)
 			m_completion_handler(msg->easy_handle, msg->data.result);
 	}
@@ -232,7 +222,6 @@ void curl_pool::add_request(CURL* request)
 {
 	auto result = curl_multi_add_handle(handle(), request);
 	check_multi_returncode(result, "curl_multi_add_handle");
-	++m_active_requests;
 	// curl will have started a timeout of 0ms inside `curl_multi_add_handle` to process this new handle
 }
 
@@ -240,7 +229,6 @@ void curl_pool::remove_request(CURL* request)
 {
 	auto result = curl_multi_remove_handle(handle(), request);
 	check_multi_returncode(result, "curl_multi_remove_handle");
-	--m_active_requests;
 }
 
 curl_boost_socket& curl_pool::add_socket(std::unique_ptr<curl_boost_socket> socket) noexcept
@@ -250,12 +238,6 @@ curl_boost_socket& curl_pool::add_socket(std::unique_ptr<curl_boost_socket> sock
 
 void curl_pool::remove_socket(curl_boost_socket& socket) noexcept
 {
-	if (m_calling_socket == &socket)
-	{
-		// track when socket is removed while inside one of its own (write/read) event handlers
-		m_calling_socket = nullptr;
-	}
-
 	(void)m_sockets.remove(socket);
 }
 

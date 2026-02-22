@@ -13,12 +13,13 @@ see LICENSE file.
 #include "libtorrent/config.hpp"
 
 #if TORRENT_USE_CURL
+#include <string>
 #include "libtorrent/io_context.hpp"
 #include "libtorrent/aux_/curl.hpp"
 #include "libtorrent/aux_/curl_boost_socket.hpp"
 #include "libtorrent/deadline_timer.hpp"
 #include "libtorrent/aux_/intrusive_list.hpp"
-#include "libtorrent/aux_/memory.hpp"
+#include "libtorrent/string_view.hpp"
 
 namespace libtorrent::aux {
 class curl_request;
@@ -33,8 +34,7 @@ public:
 	// Triggers curl processing of socket event.
 	// May call destructor of the "socket" parameter and other sockets before it returns.
 	// May call completion handler for easy handles before it returns (which may delete or remove them).
-	// Will return true, if the `socket` parameter is still alive.
-	bool socket_event(curl_boost_socket& socket, curl_cselect_t event);
+	void socket_event(curl_boost_socket& socket, curl_cselect_t event);
 
 	void add_request(CURL*);
 	void remove_request(CURL*);
@@ -47,7 +47,6 @@ public:
 	void set_completion_callback(completion_handler_t cb) { m_completion_handler = std::move(cb); }
 
 	[[nodiscard]] executor_type get_executor() const noexcept { return m_executor; }
-	[[nodiscard]] int count() const noexcept { return m_active_requests; }
 private:
 	template<typename T>
 	using enable_if_no_string_t = std::enable_if_t<
@@ -73,7 +72,7 @@ private:
 							void* socketp);
 
 	static int update_socket(curl_socket_t native_socket,
-							bitmask<curl_poll_t> what,
+							bitmask<curl_poll_t> poll_mode,
 							curl_pool* pool,
 							curl_boost_socket* socket);
 
@@ -85,16 +84,14 @@ private:
 	curl_boost_socket& add_socket(std::unique_ptr<curl_boost_socket> socket) noexcept;
 	void remove_socket(curl_boost_socket& socket) noexcept;
 
-	// cant be unique_ptr due to its destructor
+	// raw_ptr due to special destructor requirements
 	CURLM* m_curl_handle;
+
 	using request_list_t = unique_ptr_intrusive_list<curl_boost_socket>;
 	request_list_t m_sockets;
 	completion_handler_t m_completion_handler;
-	curl_boost_socket* m_calling_socket = nullptr;
 	deadline_timer m_timer;
 	executor_type m_executor;
-	int m_active_requests = 0;
-	int m_max_connections = 0;
 };
 }
 #endif //TORRENT_USE_CURL

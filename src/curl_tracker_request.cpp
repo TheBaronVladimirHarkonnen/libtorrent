@@ -12,10 +12,10 @@ see LICENSE file.
 
 #if TORRENT_USE_CURL
 #include "libtorrent/aux_/curl_tracker_manager.hpp"
-#include "libtorrent/http_tracker_connection.hpp"
-#include "libtorrent/tracker_manager.hpp"
 #include "libtorrent/parse_url.hpp"
-#include "libtorrent/aux_/session_settings.hpp"
+#include "libtorrent/tracker_manager.hpp"
+#include "libtorrent/session_settings.hpp"
+#include "libtorrent/settings_pack.hpp"
 
 namespace libtorrent::aux {
 curl_tracker_request::curl_tracker_request(
@@ -31,53 +31,43 @@ curl_tracker_request::curl_tracker_request(
 
 bool curl_tracker_request::is_stopped_event() const noexcept
 {
-	TORRENT_ASSERT(m_params);
 	return m_params->event == event_t::stopped;
 }
 
 curl_tracker_request::error_type curl_tracker_request::initialize_request()
 {
-	error_type result;
 	m_request.set_defaults();
 	m_request.set_private_data(this);
 
-	TORRENT_ASSERT(m_params);
-	if (!m_params->outgoing_socket)
+	const auto& settings = m_owner.settings();
+	constexpr bool i2p = false; // unsupported
+
+	http_tracker_request_common common{*m_params, settings};
+	auto error = common.validate_socket(i2p);
+	if (error)
 	{
-		result.ec = errors::invalid_listen_socket;
-		result.op = operation_t::get_interface;
-		result.message = "outgoing socket was closed";
-		return result;
+		return error;
 	}
 
-	const auto& settings = m_owner.settings();
-
-	constexpr bool i2p = false;
-	const std::string url = build_tracker_url(*m_params, settings, i2p, result.ec);
-	if (result.ec)
-		return result;
+	const std::string url = common.build_tracker_url(i2p, error);
+	if (error)
+	{
+		return error;
+	}
 	m_request.set_url(url);
 
 	const auto bind_device = m_params->outgoing_socket.device();
 	const auto bind_address = m_params->outgoing_socket.get_local_endpoint().address();
 	if (!m_request.bind(bind_device, bind_address))
 	{
-		result.ec = errors::invalid_listen_socket;
-		result.op = operation_t::get_interface;
-		result.message = "could not bind to device '"+ bind_device +"' with ip '"+ bind_address.to_string() +"'";
-		return result;
+		error.code = errors::invalid_listen_socket;
+		error.op = operation_t::get_interface;
+		error.failure_reason = "could not bind to device '"+ bind_device +"' with ip '"+ bind_address.to_string() +"'";
+		return error;
 	}
 
-	// in anonymous mode we omit the user agent to mitigate fingerprinting of
-	// the client. Private torrents is an exception because some private
-	// trackers may require the user agent
-	bool const anon_user = settings.get_bool(settings_pack::anonymous_mode) && !m_params->private_torrent;
-	m_request.set_user_agent(anon_user ? "curl/7.81.0" : settings.get_str(settings_pack::user_agent));
-
-	int const timeout = m_params->event == event_t::stopped
-							? settings.get_int(settings_pack::stop_tracker_timeout)
-							: settings.get_int(settings_pack::tracker_completion_timeout);
-	m_request.set_timeout(seconds32(timeout));
+	m_request.set_user_agent(common.get_user_agent());
+	m_request.set_timeout(common.get_timeout());
 
 	if (!settings.get_bool(settings_pack::validate_https_trackers))
 	{
@@ -88,25 +78,22 @@ curl_tracker_request::error_type curl_tracker_request::initialize_request()
 	m_request.set_ssrf_mitigation(settings.get_bool(settings_pack::ssrf_mitigation));
 	m_request.set_ip_filter(m_params->filter);
 
-	auto [protocol, auth, hostname, port, path]
-			= parse_url_components(url, result.ec);
-
-	if (result.ec)
-	{
-		result.op = operation_t::parse_address;
-		return result;
-	}
-
-	if (!settings.get_bool(settings_pack::allow_idna) && is_idna(hostname))
-	{
-		result.ec = errors::blocked_by_idna;
-		return result;
-	}
-
 #if TORRENT_ABI_VERSION == 1
-	if (auth.empty())
+	if (!m_params->auth.empty())
 	{
-		m_request.set_userpwd(m_params->auth);
+		auto [protocol, auth, hostname, port, path]
+				= parse_url_components(url, error.code);
+
+		if (error.code)
+		{
+			error.op = operation_t::parse_address;
+			return error;
+		}
+
+		if (auth.empty())
+		{
+			m_request.set_userpwd(m_params->auth);
+		}
 	}
 #endif
 
@@ -129,11 +116,11 @@ curl_tracker_request::error_type curl_tracker_request::initialize_request()
 #ifndef TORRENT_DISABLE_LOGGING
 	if (auto cb = requester())
 	{
-		cb->debug_log("==> TRACKER_REQUEST [ url: %s ]", url.c_str());
+		common.log_request(*cb, url);
 	}
 #endif
 
-	return result;
+	return error;
 }
 
 void curl_tracker_request::complete(CURLcode result)
@@ -145,8 +132,8 @@ void curl_tracker_request::complete(CURLcode result)
 
 	if (result != CURLE_OK)
 	{
-		auto error_status = m_request.get_error(result);
-		return fail(error_status);
+		auto error = m_request.get_error(result);
+		return fail(error.ec, error.op, error.message);
 	}
 	on_response();
 }
@@ -176,38 +163,15 @@ void curl_tracker_request::on_response()
 	if (!cb)
 		return;
 
-	const auto data = m_request.data();
-	error_code ec;
-	tracker_response resp = parse_tracker_response(data, ec,
-													m_params->kind, m_params->info_hash);
+	error_code ip_error;
+	const address ip = m_request.get_ip(ip_error);
 
-	resp.interval = std::max(resp.interval,
-							seconds32{m_owner.settings().get_int(settings_pack::min_announce_interval)});
+	std::list<address> ip_list;
+	if (!ip_error)
+		ip_list.push_back(ip);
 
-	if (!resp.warning_message.empty())
-		cb->tracker_warning(*m_params, resp.warning_message);
-
-	if (ec)
-	{
-		const seconds32 retry_delay = std::max(resp.interval, resp.min_interval);
-		return fail(ec, operation_t::unknown, resp.failure_reason, retry_delay);
-	}
-
-	// do slightly different things for scrape requests
-	if (m_params->kind & tracker_request::scrape_request)
-	{
-		cb->tracker_scrape_response(*m_params, resp.complete
-									, resp.incomplete, resp.downloaded, resp.downloaders);
-	}
-	else
-	{
-		std::list<address> ip_list;
-		const address ip = m_request.get_ip(ec);
-		if (!ec)
-			ip_list.push_back(ip);
-
-		cb->tracker_response(*m_params, ip, ip_list, resp);
-	}
+	http_tracker_request_common common{*m_params, m_owner.settings()};
+	common.process_response(*cb, ip, ip_list, m_request.data());
 }
 }
 #endif //TORRENT_USE_CURL

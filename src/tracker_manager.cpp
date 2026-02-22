@@ -542,7 +542,7 @@ constexpr tracker_request_flags_t tracker_request::i2p;
 		return int(m_http_conns.size() + m_udp_conns.size())
 #if TORRENT_USE_CURL
 			// Note: we don't know if these are connections or queued inside curl
-			+ m_curl_requests.count()
+			+ m_curl_requests.size()
 #endif
 		;
 	}
