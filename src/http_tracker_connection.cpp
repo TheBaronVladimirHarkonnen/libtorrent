@@ -49,7 +49,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 #include "libtorrent/tracker_manager.hpp"
 #include "libtorrent/http_tracker_connection.hpp"
-#include "libtorrent/aux_/http_tracker_request_common.hpp"
+#include "libtorrent/aux_/http_tracker_request.hpp"
 #include "libtorrent/http_connection.hpp"
 #include "libtorrent/aux_/escape_string.hpp"
 #include "libtorrent/io.hpp"
@@ -57,8 +57,8 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/string_util.hpp" // for is_i2p_url
 #include "libtorrent/aux_/session_settings.hpp"
 #include "libtorrent/aux_/resolver_interface.hpp"
-#include "libtorrent/ip_filter.hpp"
-#include "libtorrent/parse_url.hpp"
+
+using namespace libtorrent::aux;
 
 namespace libtorrent {
 
@@ -71,6 +71,11 @@ namespace libtorrent {
 		, m_ioc(ios)
 	{}
 
+	void http_tracker_connection::fail_error(aux::http_tracker_request::error_type& error)
+	{
+		fail(error.code, error.op, error.failure_reason.c_str(), error.interval, error.min_interval);
+	}
+
 	void http_tracker_connection::start()
 	{
 #if TORRENT_USE_I2P
@@ -80,18 +85,20 @@ namespace libtorrent {
 #endif
 
 		auto& settings = m_man.settings();
-		aux::http_tracker_request_common common{tracker_req(), settings};
+		http_tracker_request common{tracker_req(), settings};
 
-		aux::http_tracker_request_common::error_type error;
+		http_tracker_request::error_type error;
 		std::string url = common.build_tracker_url(i2p, error);
-		if (error) {
-			fail(error.code, operation_t::bittorrent, error.failure_reason.c_str(), error.interval);
+		if (error)
+		{
+			fail_error(error);
 			return;
 		}
 
 		error = common.validate_socket(i2p);
-		if (error) {
-			fail(error.code, operation_t::bittorrent, error.failure_reason.c_str(), error.interval);
+		if (error)
+		{
+			fail_error(error);
 			return;
 		}
 
@@ -125,7 +132,7 @@ namespace libtorrent {
 		aux::proxy_settings ps(settings);
 		m_tracker_connection->get(url, seconds(timeout)
 			, ps.proxy_tracker_connections ? &ps : nullptr
-			, 5, user_agent, bi
+			, http_tracker_request::max_redirects, user_agent, bi
 			, (tracker_req().event == event_t::stopped
 				? aux::resolver_interface::cache_only : aux::resolver_flags{})
 				| aux::resolver_interface::abort_on_shutdown
@@ -182,73 +189,20 @@ namespace libtorrent {
 			return;
 		}
 
-		aux::session_settings const& settings = m_man.settings();
-		bool const ssrf_mitigation = settings.get_bool(settings_pack::ssrf_mitigation);
-		if (ssrf_mitigation && std::find_if(endpoints.begin(), endpoints.end()
-			, [](tcp::endpoint const& ep) { return ep.address().is_loopback(); }) != endpoints.end())
+		http_tracker_request common{tracker_req(), m_man.settings()};
+		if (auto error = common.filter(m_requester, endpoints, c.url()))
 		{
-			// there is at least one loopback address in here. If the request
-			// path for this tracker is not /announce. filter all loopback
-			// addresses.
-			std::string path;
-
-			error_code ec;
-			std::tie(std::ignore, std::ignore, std::ignore, std::ignore, path)
-				= parse_url_components(c.url(), ec);
-			if (ec)
-			{
-				fail(ec, operation_t::parse_address);
-				return;
-			}
-
-			if (is_ssrf_path(path))
-			{
-				for (auto i = endpoints.begin(); i != endpoints.end();)
-				{
-					if (i->address().is_loopback())
-						i = endpoints.erase(i);
-					else
-						++i;
-				}
-			}
-
-			if (endpoints.empty())
-			{
-				fail(errors::ssrf_mitigation, operation_t::bittorrent);
-				return;
-			}
+			fail_error(error);
+			return;
 		}
-
-		TORRENT_UNUSED(c);
-		if (!tracker_req().filter) return;
-
-		// remove endpoints that are filtered by the IP filter
-		for (auto i = endpoints.begin(); i != endpoints.end();)
-		{
-			if (tracker_req().filter->access(i->address()) == ip_filter::blocked)
-				i = endpoints.erase(i);
-			else
-				++i;
-		}
-
-#ifndef TORRENT_DISABLE_LOGGING
-		std::shared_ptr<request_callback> cb = requester();
-		if (cb)
-		{
-			cb->debug_log("*** TRACKER_FILTER");
-		}
-#endif
-		if (endpoints.empty())
-			fail(errors::banned_by_ip_filter, operation_t::bittorrent);
 	}
 
 	// returns true if the hostname is allowed
 	bool http_tracker_connection::on_filter_hostname(http_connection&
 		, string_view hostname)
 	{
-		aux::session_settings const& settings = m_man.settings();
-		if (settings.get_bool(settings_pack::allow_idna)) return true;
-		return !is_idna(hostname);
+		http_tracker_request common{tracker_req(), m_man.settings()};
+		return common.allowed_by_idna(hostname);
 	}
 
 	void http_tracker_connection::on_connect(http_connection& c)
@@ -302,7 +256,7 @@ namespace libtorrent {
 			}
 		}
 
-		aux::http_tracker_request_common common{tracker_req(), m_man.settings()};
+		http_tracker_request common{tracker_req(), m_man.settings()};
 		auto error = common.process_response(*cb, m_tracker_ip, ip_list, data);
 		if (error)
 		{

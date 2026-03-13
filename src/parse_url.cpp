@@ -176,6 +176,18 @@ exit:
 		return std::make_tuple(std::move(base), std::move(path));
 	}
 
+	exploded_url::exploded_url(std::string url, error_code& ec)
+	{
+		auto [protocol, auth, hostname, port, path]
+			= parse_url_components(std::move(url), ec);
+
+		m_protocol = std::move(protocol);
+		m_auth     = std::move(auth);
+		m_hostname = std::move(hostname);
+		m_port	   = port;
+		m_path	   = std::move(path);
+	}
+
 	TORRENT_EXTRA_EXPORT bool is_idna(string_view hostname)
 	{
 		for (;;)
@@ -192,10 +204,10 @@ exit:
 		}
 	}
 
-	bool is_ssrf_path(string_view path)
+	bool is_announce_path(string_view path)
 	{
 		const std::string announce_path = "/announce";
-		return path.substr(0, announce_path.length()) != announce_path;
+		return path.substr(0, announce_path.length()) == announce_path;
 	}
 
 	bool has_tracker_query_string(string_view query_string)

@@ -56,7 +56,7 @@ void curl_tracker_manager::initialize_pool(io_context& ios)
 {
 	if (m_pool) return;
 	m_pool = std::make_unique<curl_pool>(ios.get_executor());
-	m_pool->set_completion_callback([this](CURL* request, CURLcode result) {
+	m_pool->set_completion_callback([this](curl_request& request, CURLcode result) {
 		on_completed(request, result);
 	});
 }
@@ -93,14 +93,17 @@ void curl_tracker_manager::add(io_context& ios,
 	// in case the setting was updated
 	m_pool->set_max_connections(settings().get_int(settings_pack::max_concurrent_http_announces));
 
-	auto request_ownership = std::make_unique<curl_tracker_request>(*this, std::move(req), std::move(cb));
-	curl_tracker_request::error_type error;
+	auto request_ownership = std::make_unique<curl_tracker_request>(*this,
+		std::move(req),
+		std::move(cb),
+		ios.get_executor());
 
+	curl_tracker_request::error_type error;
 	try
 	{
 		// two-step initialization to avoid throwing inside constructor
 		// - protects the lifetimes of req and cb
-		// - reusable fail() function
+		// - able to call fail() function
 		error = request_ownership->initialize_request();
 	}
 	catch (const curl_easy_error& ex)
@@ -128,29 +131,21 @@ void curl_tracker_manager::add(io_context& ios,
 		// async to avoid recursive calls towards our caller (through the completion handler)
 		post(ios, [request_ownership = std::move(request_ownership), result = std::move(error)]() {
 			request_ownership->fail(result);
+			// ownership goes out of scope
 		});
 		return;
 	}
 
 	auto& request = m_requests.add(std::move(request_ownership));
-	m_pool->add_request(request.get_curl_request().handle());
+	m_pool->add_request(request.get_curl_request());
 }
 
-std::unique_ptr<curl_tracker_request> curl_tracker_manager::remove(curl_tracker_request& request)
+void curl_tracker_manager::on_completed(curl_request& request, CURLcode result)
 {
-	TORRENT_ASSERT(m_pool);
-	m_pool->remove_request(request.get_curl_request().handle());
-	return m_requests.remove(request);
-}
-
-// this is not triggered from within add() to prevent executing a parent callback inside their function call to add()
-void curl_tracker_manager::on_completed(CURL* handle, CURLcode result)
-{
-	auto request = curl_tracker_request::from_handle(handle);
-	TORRENT_ASSERT(request);
-
-	auto request_ownership = remove(*request);
+	auto& tracker_request = curl_tracker_request::from_request(request);
+	auto request_ownership = m_requests.remove(tracker_request);
 	request_ownership->complete(result);
+	// ownership goes out of scope
 }
 
 void curl_tracker_manager::abort_all(bool abort_stopped_events)
@@ -164,9 +159,10 @@ void curl_tracker_manager::abort_all(bool abort_stopped_events)
 			if (rc) rc->debug_log("aborting: %s", it->get_params().url.c_str());
 #endif
 
-			// m_pool->remove NOT does invoke callbacks (like on_completed) which means the other iterators remain valid
-			// Note that this does not trigger the completion handlers (same as reference implementation)
-			(void) remove(*(it++));
+			// Note that this does not trigger the completion handlers
+			m_pool->remove_request(it->get_curl_request());
+			// remove() leaves all other iterators intact
+			m_requests.remove(*(it++));
 		}
 		else
 		{

@@ -41,6 +41,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include "libtorrent/peer_id.hpp"
 #include "libtorrent/error_code.hpp"
 #include "libtorrent/tracker_manager.hpp" // for tracker_connection
+#include "libtorrent/aux_/http_tracker_request.hpp"
 
 namespace libtorrent {
 
@@ -65,6 +66,8 @@ namespace libtorrent {
 
 		void start() override;
 		void close() override;
+
+		void fail_error(aux::http_tracker_request::error_type& error);
 
 	private:
 

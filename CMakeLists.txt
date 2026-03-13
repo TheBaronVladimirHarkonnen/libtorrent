@@ -236,7 +236,7 @@ set(libtorrent_aux_include_files
 	file_view_pool.hpp
 	has_block.hpp
 	heterogeneous_queue.hpp
-	http_tracker_request_common.hpp
+	http_tracker_request.hpp
 	instantiate_connection.hpp
 	intrusive_list.hpp
 	invariant_check.hpp
@@ -355,7 +355,7 @@ set(sources
 	http_parser.cpp
 	http_seed_connection.cpp
 	http_tracker_connection.cpp
-	http_tracker_request_common.cpp
+	http_tracker_request.cpp
 	i2p_stream.cpp
 	identify_client.cpp
 	instantiate_connection.cpp

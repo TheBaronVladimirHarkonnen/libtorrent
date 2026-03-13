@@ -38,6 +38,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <tuple>
 #include <string>
 
+#include "libtorrent/string_view.hpp"
 #include "libtorrent/error_code.hpp"
 #include "libtorrent/string_view.hpp"
 
@@ -48,6 +49,23 @@ namespace libtorrent {
 		, std::string, int, std::string>
 		parse_url_components(std::string url, error_code& ec);
 
+	class TORRENT_EXTRA_EXPORT exploded_url {
+		std::string m_protocol;
+		std::string m_auth;
+		std::string m_hostname;
+		std::string m_path;
+		int m_port;
+	public:
+		exploded_url(std::string url, error_code& ec);
+		exploded_url(exploded_url&&) = default;
+
+		[[nodiscard]] string_view protocol() const { return m_protocol; }
+		[[nodiscard]] string_view auth()     const { return m_auth; }
+		[[nodiscard]] string_view hostname() const { return m_hostname; }
+		[[nodiscard]] string_view path()     const { return m_path; }
+		[[nodiscard]] int port()             const { return m_port; }
+	};
+
 	// split a URL in its base and path parts
 	TORRENT_EXTRA_EXPORT std::tuple<std::string, std::string>
 		split_url(std::string url, error_code& ec);
@@ -56,10 +74,7 @@ namespace libtorrent {
 	// name) labels.
 	TORRENT_EXTRA_EXPORT bool is_idna(string_view hostname);
 
-	// mitigation for Server Side request forgery. Any tracker
-	// announce to localhost need to look like a standard BitTorrent
-	// announce
-	bool is_ssrf_path(string_view path);
+	bool is_announce_path(string_view path);
 
 	// the query string is the part of the URL immediately following "?", i.e.
 	// the query string arguments. This function returns true if any of the

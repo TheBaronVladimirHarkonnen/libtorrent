@@ -14,27 +14,27 @@ see LICENSE file.
 #include "libtorrent/config.hpp"
 
 #if TORRENT_USE_CURL
+#include <functional>
 #include <string>
 #include "libtorrent/address.hpp"
 #include "libtorrent/aux_/curl.hpp"
 #include "libtorrent/aux_/curl_basic_request.hpp"
-#include "libtorrent/error_code.hpp"
-#include "libtorrent/operations.hpp"
+#include "libtorrent/deadline_timer.hpp"
+#include "libtorrent/io_context.hpp"
 #include "libtorrent/span.hpp"
-#include "libtorrent/string_view.hpp"
 #include "libtorrent/time.hpp"
 #include <boost/beast/core/flat_buffer.hpp>
 
-namespace libtorrent {
-struct ip_filter;
+namespace libtorrent{
+class exploded_url;
 }
 
 namespace libtorrent::aux {
 
-// this class extends curl_basic_request with features not natively supported by curl
+// extends curl_basic_request with features not natively supported by curl
 class TORRENT_EXTRA_EXPORT curl_request : public curl_basic_request {
 public:
-	explicit curl_request(std::size_t max_buffer_size);
+	explicit curl_request(std::size_t max_buffer_size, const io_context::executor_type& executor);
 	~curl_request() = default;
 
 	void set_defaults();
@@ -42,17 +42,34 @@ public:
 	[[nodiscard]] span<const char> data() const noexcept;
 	[[nodiscard]] error_type get_error(CURLcode result) const;
 
-	void set_ip_filter(std::shared_ptr<const ip_filter> filter) noexcept { m_ip_filter = std::move(filter); }
-	void set_ssrf_mitigation(bool enabled) noexcept { m_enable_ssrf_mitigation = enabled; }
-	void set_block_idna(bool enabled) noexcept { m_block_idna = enabled; }
+	using filter_t = bool (*)(curl_request& request, const address& ip);
+	void set_filter(filter_t filter) noexcept { m_filter = filter; }
 
-	void set_timeout(seconds32 timeout);
+	using redirect_t = error_code (*)(curl_request& request, const exploded_url& parts);
+	void set_redirect_callback(redirect_t cb) noexcept { m_redirect_cb = cb; }
+
+	using timeout_callback_t = std::function<void(curl_request& request)>;
+	// callback is called async, request object can be deleted inside the callback
+	void set_timeout_callback(timeout_callback_t cb) noexcept { m_timeout_callback = cb; }
+	void set_timeout(seconds32 timeout) { m_timeout = timeout; }
+	void cancel_timeout() { m_timer.cancel(); };
+
+	// returns false on error
+	bool prepare_to_follow_redirect();
+
+	[[nodiscard]] bool is_redirect_response() const;
+	void set_max_redirects(int value) { m_allowed_redirects = value; }
+
+	template<typename T>
+	T* get_userdata() const { return static_cast<T*>(m_userdata); }
+	void set_userdata(void* value) { m_userdata = value; }
 
 private:
-	[[nodiscard]] bool allowed_by_ip_filter(const address& ip);
-	[[nodiscard]] bool allowed_by_ssrf(const address& ip, const std::string& path);
-	[[nodiscard]] bool allowed_by_idna(const std::string& hostname);
-	[[nodiscard]] bool validate_request(const address& address, string_view url);
+	void start_timeout(seconds32 timeout);
+
+	[[nodiscard]] error_type redirect_security_settings(const exploded_url& parts);
+
+	[[nodiscard]] bool filter(const address& ep);
 
 	static size_t write_callback(char* ptr, size_t size, size_t nmemb, void* userdata);
 
@@ -60,18 +77,26 @@ private:
 									curlsocktype purpose,
 									curl_sockaddr* addr);
 
-	static curl_socket_t approve_curl_request(void* clientp,
+	static curl_socket_t before_curl_request(void* clientp,
 											char* conn_primary_ip,
 											char* conn_local_ip,
 											int conn_primary_port,
 											int conn_local_port);
 
-	std::shared_ptr<const ip_filter> m_ip_filter;
+	static int before_resolving(void *resolver_state, void *reserved, void *userdata);
+
+	timeout_callback_t m_timeout_callback = nullptr;
+	filter_t m_filter = nullptr;
+	redirect_t m_redirect_cb = nullptr;
+	void* m_userdata = nullptr;
+
 	boost::beast::flat_buffer m_read_buffer;
-	error_code m_status;
-	operation_t m_error_operation = operation_t::unknown;
-	bool m_enable_ssrf_mitigation = false;
-	bool m_block_idna = false;
+	deadline_timer m_timer;
+	seconds32 m_timeout{};
+	address m_filter_allowed;
+	error_type m_error;
+
+	int m_allowed_redirects = 0;
 };
 }
 
